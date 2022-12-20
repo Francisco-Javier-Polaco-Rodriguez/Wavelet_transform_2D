@@ -7,7 +7,13 @@ import numpy as np;                 import matplotlib.pyplot as plt
 import pywt;                        from scipy.io import loadmat,savemat
 import imageio;                     import os
 from progress.bar import Bar;       from threading import Thread
-from functools import lru_cache;    import scipy.fft as compute
+from functools import lru_cache;    import pyfftw.interfaces.scipy_fftpack as fft
+
+## Optimizating the pyfftw.interfaces by letting acces to de cache, since several fft are done in a cwt.
+
+import pyfftw
+pyfftw.interfaces.cache.enable()
+pyfftw.interfaces.cache.set_keepalive_time(10)
 
 ###---Previous-definitions-------------------------------------------------
 sin = np.sin
@@ -74,20 +80,7 @@ def target_cwt2d(fft2Axt,w0,w,k,Domega): # Old
     if (np.abs(w0[0]/Domega[0])**2+np.abs(w0[1]/Domega[1])**2)**0.5 < 6:
         Sum_cft_x = np.full(fft2Axt[:,0].shape,np.nan)
     else:
-        Sum_cft_x = np.sum(np.abs(np.fft.ifft2(fft2Axt*morlet(w,k,w0 = w0,Dw = Domega)))**2,axis = 1) #Sum_x{IFFT2[FFT2(Axt)*psi]²}(t)
-    return Sum_cft_x
-
-def target_cwt2d_(fft2Axt,w0,w,k,Domega): # To do tryals
-    """
-    Wavelet transform for only one (w_i,k_i), we use this fonction like target for doing threading.
-    """
-    if (np.abs(w0[0]/Domega[0])**2+np.abs(w0[1]/Domega[1])**2)**0.5 < 6:
-        Sum_cft_x = np.full(fft2Axt[:,0].shape,np.nan)
-    else:
-        ifft = compute.ifft2(fft2Axt*morlet(w,k,w0 = w0,Dw = Domega))
-        absifft2 = np.abs(ifft)**2
-        Sum_cft_x = np.sum(absifft2,axis = 1) #Sum_x{IFFT2[FFT2(Axt)*psi]²}(t)
-        del absifft2,ifft
+        Sum_cft_x = np.sum(np.abs(fft.ifft2(fft2Axt*morlet(w,k,w0 = w0,Dw = Domega)))**2,axis = 1) #Sum_x{IFFT2[FFT2(Axt)*psi]²}(t)
     return Sum_cft_x
 
 
@@ -112,7 +105,13 @@ def cwt_2d(Axt,w_in,k_in,dt,dx,Domega,ncores=1):
     Domega = Domega*np.array([dt,dx])
     Sum_cft_x = np.zeros([Axt.shape[0],shap[0],shap[1]],dtype='float32')
     k,w = _create_frequency_plane(Axt.shape)
-    fft2Axt = np.fft.fft2(Axt)
+    fft2Axt = fft.fft2(Axt)
+
+    # We remember the better way of calculating a fft with such dimmentions.
+
+    wisdom = pyfftw.export_wisdom()
+    pyfftw.import_wisdom(wisdom)
+
     bar = Bar('Processing', max = shap[0]*shap[1],suffix='%(percent)d%%(%(elapsed)ds elapsed) %(eta)ds remaining')
     for i in range(shap[0]):
         for s in range(np.int32(shap[1]/ncores)):
